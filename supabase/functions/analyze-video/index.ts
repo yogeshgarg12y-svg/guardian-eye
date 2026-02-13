@@ -8,11 +8,12 @@ const corsHeaders = {
 
 const SYSTEM_PROMPT = `You are a video safety analysis system.
 
-You will receive frames from a video.
+You will receive frames from a video. Each frame is labeled with its timestamp in the video.
 
 Your tasks:
 1. Describe what is happening across the frames.
 2. Determine whether any harmful or abnormal event occurred.
+3. If a harmful event is detected, identify the approximate time range where it occurs.
 
 Consider the following as harmful:
 - Violence or physical fights
@@ -27,7 +28,10 @@ You MUST respond with valid JSON in this exact format (no markdown, no extra tex
   "summary": "<2-4 sentence description of what is happening>",
   "bad_event": true or false,
   "reason": "<one short sentence explaining the decision>",
-  "confidence": <number from 0 to 1>
+  "confidence": <number from 0 to 1>,
+  "anomaly_start": <start time in seconds where the anomaly begins, or null if no anomaly>,
+  "anomaly_end": <end time in seconds where the anomaly ends, or null if no anomaly>,
+  "event_type": "<category: violence, accident, fire, theft, medical, unsafe, or none>"
 }`;
 
 serve(async (req) => {
@@ -36,7 +40,7 @@ serve(async (req) => {
   }
 
   try {
-    const { frames } = await req.json();
+    const { frames, timestamps, duration } = await req.json();
 
     if (!frames || !Array.isArray(frames) || frames.length === 0) {
       return new Response(
@@ -50,18 +54,23 @@ serve(async (req) => {
       throw new Error("LOVABLE_API_KEY is not configured");
     }
 
-    // Build content array with frames as images
+    // Build content array with frames labeled by timestamp
     const content: any[] = [
       {
         type: "text",
-        text: "Analyze these video frames for safety concerns. Respond ONLY with valid JSON.",
+        text: `Analyze these video frames for safety concerns. The video is ${(duration || 0).toFixed(1)} seconds long. Each frame is labeled with its timestamp. Respond ONLY with valid JSON.`,
       },
     ];
 
-    for (const frame of frames) {
-      // frame is a data URL like "data:image/jpeg;base64,..."
+    for (let i = 0; i < frames.length; i++) {
+      const frame = frames[i];
+      const ts = timestamps?.[i] ?? i;
       const base64 = frame.split(",")[1];
       if (base64) {
+        content.push({
+          type: "text",
+          text: `[Frame at ${ts.toFixed(1)}s]`,
+        });
         content.push({
           type: "image_url",
           image_url: {
@@ -114,10 +123,8 @@ serve(async (req) => {
       throw new Error("No response from AI model");
     }
 
-    // Parse the JSON response from AI
     let analysisResult;
     try {
-      // Try to extract JSON from the response (handle markdown code blocks)
       const jsonMatch = messageContent.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         analysisResult = JSON.parse(jsonMatch[0]);
@@ -131,6 +138,9 @@ serve(async (req) => {
         bad_event: false,
         reason: "Could not parse structured response",
         confidence: 0.5,
+        anomaly_start: null,
+        anomaly_end: null,
+        event_type: "none",
       };
     }
 
