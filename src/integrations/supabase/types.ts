@@ -14,7 +14,45 @@ export type Database = {
   }
   public: {
     Tables: {
-      [_ in never]: never
+      analysis_timing_logs: {
+        Row: {
+          ai_inference_ms: number | null
+          created_at: string
+          frame_extract_ms: number | null
+          id: string
+          network_upload_ms: number | null
+          render_results_ms: number | null
+          total_ms: number | null
+          video_duration_s: number | null
+          video_name: string | null
+          video_upload_ms: number | null
+        }
+        Insert: {
+          ai_inference_ms?: number | null
+          created_at?: string
+          frame_extract_ms?: number | null
+          id?: string
+          network_upload_ms?: number | null
+          render_results_ms?: number | null
+          total_ms?: number | null
+          video_duration_s?: number | null
+          video_name?: string | null
+          video_upload_ms?: number | null
+        }
+        Update: {
+          ai_inference_ms?: number | null
+          created_at?: string
+          frame_extract_ms?: number | null
+          id?: string
+          network_upload_ms?: number | null
+          render_results_ms?: number | null
+          total_ms?: number | null
+          video_duration_s?: number | null
+          video_name?: string | null
+          video_upload_ms?: number | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never
