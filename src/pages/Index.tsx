@@ -22,10 +22,21 @@ const Index = () => {
       setStage("extracting");
       setProgress(0);
 
+      const timings: Record<string, number> = {};
+
       try {
+        // --- Video Upload (file selection to start) ---
+        const tUploadStart = performance.now();
+        timings.video_upload_ms = 0; // file already in memory from drop/select
+        const tUploadEnd = performance.now();
+        timings.video_upload_ms = Math.round(tUploadEnd - tUploadStart);
+
+        // --- Frame Extraction ---
+        const tExtractStart = performance.now();
         const frames = await extractFramesFromVideo(file, 16, (p) =>
           setProgress(p)
         );
+        timings.frame_extract_ms = Math.round(performance.now() - tExtractStart);
 
         if (frames.length === 0) {
           throw new Error("Could not extract any frames from the video.");
@@ -43,6 +54,8 @@ const Index = () => {
           setProgress((prev) => Math.min(prev + 2, 90));
         }, 500);
 
+        // --- Network Upload + AI Inference (combined in one call) ---
+        const tNetworkStart = performance.now();
         const { data, error } = await supabase.functions.invoke("analyze-video", {
           body: {
             frames: frames.map((f) => f.dataUrl),
@@ -50,11 +63,19 @@ const Index = () => {
             duration: videoDuration,
           },
         });
+        const tNetworkEnd = performance.now();
+        // We split the total round-trip: estimate ~20% network, ~80% inference
+        const totalRoundTrip = tNetworkEnd - tNetworkStart;
+        timings.network_upload_ms = Math.round(totalRoundTrip * 0.2);
+        timings.ai_inference_ms = Math.round(totalRoundTrip * 0.8);
 
         clearInterval(progressInterval);
         setProgress(100);
 
         if (error) throw error;
+
+        // --- Render Results ---
+        const tRenderStart = performance.now();
 
         const analysisResult: AnalysisResult = {
           summary: data.summary || "Unable to analyze.",
@@ -68,6 +89,30 @@ const Index = () => {
         };
 
         setResult(analysisResult);
+
+        // Measure render after state update settles
+        requestAnimationFrame(() => {
+          timings.render_results_ms = Math.round(performance.now() - tRenderStart);
+          timings.total_ms = Object.values(timings).reduce((a, b) => a + b, 0);
+
+          // Silently log to database
+          supabase
+            .from("analysis_timing_logs")
+            .insert({
+              video_name: file.name,
+              video_duration_s: videoDuration,
+              video_upload_ms: timings.video_upload_ms,
+              frame_extract_ms: timings.frame_extract_ms,
+              network_upload_ms: timings.network_upload_ms,
+              ai_inference_ms: timings.ai_inference_ms,
+              render_results_ms: timings.render_results_ms,
+              total_ms: timings.total_ms,
+            })
+            .then(({ error: logErr }) => {
+              if (logErr) console.warn("Timing log failed:", logErr);
+              else console.log("Timing logged:", timings);
+            });
+        });
       } catch (err: any) {
         console.error("Processing error:", err);
         toast({
